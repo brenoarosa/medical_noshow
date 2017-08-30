@@ -96,8 +96,8 @@ class MLP(nn.Module):
     def _init_weigths(self):
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                module.weight.data.uniform_(-.15, .15)
-                module.bias.data.zero_()
+                nn.init.xavier_uniform(module.weight.data, gain=1)
+                nn.init.constant(module.bias.data, 0)
 
     def forward(self, x):
         for layer in self.layers:
