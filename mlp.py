@@ -17,18 +17,22 @@ from keras.models import Sequential
 from keras.layers import Dense, Activation
 from keras.optimizers import Adam
 
-from utils.tensorboard import TBLogger
+from tensorboard import SummaryWriter
 from utils.class_weights import compute_sample_weight
 
 workers = joblib.cpu_count()
 
-log_path = "./log/dev"
-logger = TBLogger(log_path)
+model_name = "dev7"
+log_path = "./log/{}".format(model_name)
+save_path = "./trained_models/{}".format(model_name)
+logger = SummaryWriter(log_path)
 
 batch_size = 4096
-num_classes = 10
-epochs = 20
+epochs = 30
 eps=1e-08
+
+convergence_patience = 3
+convergence_delta = .001
 
 
 X_train = joblib.load("preprocessed_data/X_train.p")
@@ -42,7 +46,7 @@ print("{} test samples.".format(X_test.shape[0]))
 print("{} validation samples.".format(X_val.shape[0]))
 
 
-layer_sizes = [X_train.shape[1], 500, 300, 100, 1]
+layer_sizes = [X_train.shape[1], 300, 100, 1]
 
 X_train = pt.from_numpy(X_train.astype("float32"))
 y_train = pt.from_numpy(y_train.astype("float32"))
@@ -125,8 +129,7 @@ def _train(model, dataloader, loss_func, optimizer):
         # Forward
         y_pred = model(X).squeeze()
 
-        weights = compute_sample_weight(y.data)
-        weights = Variable(weights)
+        weights = compute_sample_weight(y)
 
         loss = loss_func(y_pred, y, weights)
 
@@ -151,8 +154,7 @@ def _evaluate(model, dataloader, loss_func):
 
         y_pred = model(X).squeeze()
 
-        weights = compute_sample_weight(y.data)
-        weights = Variable(weights)
+        weights = compute_sample_weight(y)
 
         batch_loss = loss_func(y_pred, y, weights)
 
@@ -175,7 +177,12 @@ model = MLP(layer_sizes)
 optimizer = pt.optim.Adam(model.parameters(), lr=0.001)
 loss_func = binary_cross_entropy
 
-for epoch in range(epochs):
+print("| epoch | train loss | test loss | train acc | test acc | best model |")
+
+lower_test_loss = {"epoch": 0, "value": np.inf}
+train_losses = np.zeros(epochs)
+best_model = deepcopy(model)
+for epoch in range(1, epochs+1):
     _train(model, train_loader, loss_func, optimizer)
     train_metrics = _evaluate(model, train_loader, loss_func)
     test_metrics = _evaluate(model, test_loader, loss_func)
@@ -185,11 +192,15 @@ for epoch in range(epochs):
     train_acc = train_metrics["acc"]
     test_acc = test_metrics["acc"]
 
-    logger.scalar_summary("loss/train", train_loss, epoch)
-    logger.scalar_summary("loss/test", test_loss, epoch)
-    logger.scalar_summary("acc/train", train_acc, epoch)
-    logger.scalar_summary("acc/test", test_acc, epoch)
+    train_losses[epoch-1] = train_loss
 
+    # logging scalars
+    logger.add_scalar("loss/train", train_loss, epoch)
+    logger.add_scalar("loss/test", test_loss, epoch)
+    logger.add_scalar("acc/train", train_acc, epoch)
+    logger.add_scalar("acc/test", test_acc, epoch)
+
+    # logging histogram
     for param, values in model.named_parameters():
         if not param.startswith("layer"):
             continue
@@ -197,9 +208,29 @@ for epoch in range(epochs):
         tag = param.split('.')
         tag.pop(1)
         tag = "/".join(tag)
-        logger.histo_summary(tag, values.data.numpy(), epoch, bins=1000)
-        logger.histo_summary(tag+'/grad', values.grad.data.numpy(), epoch, bins=1000)
+        logger.add_histogram(tag, values.data.numpy(), epoch, bins="auto")
+        logger.add_histogram(tag+'/grad', values.grad.data.numpy(), epoch, bins="auto")
 
-    print("{:2d} -> Train loss: {:.4f}\t Test loss: {:.4f}\t"
-          "Train acc: {:.4f}\t Test acc: {:.4f}"
-          .format(epoch, train_loss, test_loss, train_acc, test_acc))
+    # Saves best model
+    new_best_model = False
+    if test_loss < lower_test_loss["value"]:
+        lower_test_loss["value"] = test_loss
+        lower_test_loss["epoch"] = epoch
+        best_model = deepcopy(model)
+        new_best_model = True
+
+    print("| {: 5d} | {: 10.4f} | {: 9.4f} | {: 9.4f} | {: 8.4f} | {:10d} |"
+          .format(epoch, train_loss, test_loss, train_acc, test_acc, new_best_model))
+
+    # Early stop on trainning loss convergence
+    es_current_idx = (epoch-1)
+    es_start_idx = np.maximum(0, es_current_idx - convergence_patience)
+    non_increased = train_loss >= (train_losses[es_start_idx:es_current_idx] - convergence_delta)
+    if np.sum(non_increased) == convergence_patience:
+        break
+
+
+pt.save(best_model, save_path)
+
+graph_pass = model(Variable(pt.FloatTensor(1, X_train.shape[1]), requires_grad=True))
+logger.add_graph(model, graph_pass)

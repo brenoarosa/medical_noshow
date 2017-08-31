@@ -1,4 +1,5 @@
 import torch as pt
+from torch.autograd import Variable
 
 def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     """Estimate sample weights by class for unbalanced datasets.
@@ -59,8 +60,20 @@ def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     y = y.long()
     batch_size = y.size(0)
 
-    y_onehot = pt.zeros(batch_size, n_classes).float()
-    y_onehot.scatter_(1, y.view(-1, 1), 1)
+    type_variable = False
+    if isinstance(y, Variable):
+        type_variable = True
+
+    if y.is_cuda:
+        y_onehot = pt.cuda.zeros(batch_size, n_classes).float()
+    else:
+        y_onehot = pt.zeros(batch_size, n_classes).float()
+
+    y_tensor = y
+    if type_variable:
+        y_tensor = y.data
+
+    y_onehot.scatter_(1, y_tensor.view(-1, 1), 1)
 
     if class_weight is None:
         class_weight = 1 / (y_onehot.sum(dim=0) + eps)
@@ -74,4 +87,7 @@ def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     weights = pt.mm(y_onehot, class_weight.view(-1, 1)).squeeze()
 
     weights = batch_size * weights / (pt.sum(weights) + eps)
+
+    if type_variable:
+        weights = Variable(weights)
     return weights
