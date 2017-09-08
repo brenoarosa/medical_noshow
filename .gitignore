@@ -108,3 +108,5 @@ log/
 
 # Ignores dataset
 data/*.csv
+
+preprocessed_data/*.p
