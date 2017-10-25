@@ -21,7 +21,7 @@ class MLP(nn.Module):
                 layer = nn.Sequential(
                     nn.BatchNorm1d(layer_sizes[i-1]),
                     nn.Linear(layer_sizes[i-1], layer_sizes[i]),
-                    nn.Relu())
+                    nn.ReLU())
             else: # last layer
                 layer = nn.Sequential(
                     nn.BatchNorm1d(layer_sizes[i-1]),
@@ -33,7 +33,6 @@ class MLP(nn.Module):
             self.layers.append(layer_name)
 
         self._init_weigths()
-        self.initial_weights = deepcopy(self.state_dict())
         return
 
     def _init_weigths(self):
@@ -41,6 +40,10 @@ class MLP(nn.Module):
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform(module.weight.data, gain=1)
                 nn.init.constant(module.bias.data, 0)
+
+                # register initial weights in module
+                module.register_buffer('initial_weight', module.weight.data.clone())
+                module.register_buffer('initial_bias', module.bias.data.clone())
 
     def forward(self, x):
         for layer in self.layers:
