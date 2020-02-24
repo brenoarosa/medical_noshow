@@ -1,7 +1,7 @@
 appdirs==1.4.3
 astroid==1.5.3
 backports.weakref==1.0rc1
-bleach==2.0.0
+bleach==3.1.1
 boto==2.48.0
 bz2file==0.98
 certifi==2017.7.27.1
